@@ -237,52 +237,7 @@ Expected columns in `all_markers`:
 
 ## Code Walkthrough
 
-### Block 1 — Filter and Rank DGE Markers
-
-Before querying any database, we filter the DGE output to keep only meaningful, specific markers.
-
-**Filtering criteria:**
-
-| Filter | Threshold | Reason |
-|---|---|---|
-| `p_val_adj` | < 0.05 | Statistical significance |
-| `avg_log2FC` | > 0.5 | Minimum expression difference |
-| `pct.1` | > 0.25 | Expressed in at least 25% of cluster cells |
-| `pct.2` | < 0.50 | **Specificity filter** — not expressed in majority of other cells |
-
-The `pct.2` filter is the most important and most commonly overlooked. A gene with high fold change but `pct.2 = 0.70` is expressed almost everywhere — it is useless for annotation.
-
-**Ranking:** Markers are ranked by `rank_score = avg_log2FC × (pct.1 - pct.2)`, which combines expression strength with specificity into a single sortable value.
-
-```r
-library(Seurat)
-library(dplyr)
-library(tidyr)
-library(tibble)
-library(ggplot2)
-
-top_markers <- all_markers %>%
-  filter(
-    p_val_adj  < 0.05,
-    avg_log2FC > 0.5,
-    pct.1      > 0.25,
-    pct.2      < 0.50
-  ) %>%
-  mutate(
-    specificity_score = pct.1 - pct.2,
-    rank_score        = avg_log2FC * specificity_score
-  ) %>%
-  group_by(cluster) %>%
-  arrange(desc(rank_score), .by_group = TRUE) %>%
-  ungroup()
-
-clusters <- sort(unique(top_markers$cluster))
-cat("Clusters found:", paste(clusters, collapse = ", "), "\n")
-```
-
----
-
-### Block 2 — Source 1: Canonical Marker List
+### Source 1: Canonical Marker List
 
 A hand-curated named list in R covering ~30 cell types. Each entry maps a cell type name to a vector of well-established marker genes. This list is tissue-agnostic — remove entries irrelevant to your tissue (e.g. remove `Hepatocyte` when analysing PBMC).
 
@@ -321,7 +276,7 @@ canonical_markers <- list(
 
 ---
 
-### Block 3 — Source 2: PanglaoDB
+### Source 2: PanglaoDB
 
 PanglaoDB is loaded from the downloaded TSV file, filtered to human markers, and converted to the same named list format as the canonical markers. The `organ_filter` argument restricts the database to cell types relevant to your tissue.
 
@@ -368,7 +323,7 @@ panglao_list <- build_panglaodb_list(
 
 ---
 
-### Block 4 — Source 3: CellMarker 2.0
+### Source 3: CellMarker 2.0
 
 CellMarker is loaded from the downloaded text file. Gene entries that are comma-separated within a single field are split into individual rows. The `tissue_filter` argument restricts to your tissue type.
 
@@ -406,7 +361,52 @@ cellmarker_list <- build_cellmarker_list(
 
 ---
 
-### Block 5 — Core Overlap Function
+### Filter and Rank DGE Markers
+
+Before querying any database, we filter the DGE output to keep only meaningful, specific markers.
+
+**Filtering criteria:**
+
+| Filter | Threshold | Reason |
+|---|---|---|
+| `p_val_adj` | < 0.05 | Statistical significance |
+| `avg_log2FC` | > 0.5 | Minimum expression difference |
+| `pct.1` | > 0.25 | Expressed in at least 25% of cluster cells |
+| `pct.2` | < 0.50 | **Specificity filter** — not expressed in majority of other cells |
+
+The `pct.2` filter is the most important and most commonly overlooked. A gene with high fold change but `pct.2 = 0.70` is expressed almost everywhere — it is useless for annotation.
+
+**Ranking:** Markers are ranked by `rank_score = avg_log2FC × (pct.1 - pct.2)`, which combines expression strength with specificity into a single sortable value.
+
+```r
+library(Seurat)
+library(dplyr)
+library(tidyr)
+library(tibble)
+library(ggplot2)
+
+top_markers <- all_markers %>%
+  filter(
+    p_val_adj  < 0.05,
+    avg_log2FC > 0.5,
+    pct.1      > 0.25,
+    pct.2      < 0.50
+  ) %>%
+  mutate(
+    specificity_score = pct.1 - pct.2,
+    rank_score        = avg_log2FC * specificity_score
+  ) %>%
+  group_by(cluster) %>%
+  arrange(desc(rank_score), .by_group = TRUE) %>%
+  ungroup()
+
+clusters <- sort(unique(top_markers$cluster))
+cat("Clusters found:", paste(clusters, collapse = ", "), "\n")
+```
+
+---
+
+### Core Overlap Function
 
 `overlap_score()` is the heart of the pipeline. It takes one cluster's top marker genes and one database, then for every cell type in that database computes four metrics:
 
@@ -460,7 +460,7 @@ overlap_score <- function(cluster_genes,
 
 ---
 
-### Block 6 — Run Across All Clusters and Sources
+### Run Across All Clusters and Sources
 
 `run_overlap_all_clusters()` is a wrapper that loops `overlap_score()` over every cluster in your dataset for a given database. The three calls produce `results_canonical`, `results_panglaodb`, and `results_cellmarker`, which are then combined with `bind_rows()` into a single long table: `all_results`.
 
@@ -510,7 +510,7 @@ write.csv(all_results, "overlap_all_sources_full.csv", row.names = FALSE)
 
 ---
 
-### Block 7 — Top 3 Hits Per Cluster Per Source
+### Top 3 Hits Per Cluster Per Source
 
 `all_results` can contain hundreds of rows per cluster. Block 7 filters it down to the top 3 candidates per cluster per source, ranked by Jaccard. This is used for inspection — the 2nd and 3rd hits tell you about annotation ambiguity.
 
@@ -525,7 +525,7 @@ top3_per_source <- all_results %>%
 
 ---
 
-### Block 8 — Normalize Names and Majority Vote
+### Normalize Names and Majority Vote
 
 **Step 8a — Pull top-1 per source:**
 
@@ -600,7 +600,7 @@ consensus_final <- consensus_wide %>%
 
 ---
 
-### Block 9 — Print Consensus Table
+### Print Consensus Table
 
 ```r
 consensus_final %>%
@@ -621,7 +621,7 @@ if (nrow(conflicts) > 0) {
 
 ---
 
-### Block 10 — Visualization
+### Visualization
 
 Three plots are generated to visualise annotation quality:
 
@@ -663,7 +663,7 @@ ggplot(consensus_final,
 
 ---
 
-### Block 11 — Apply Labels to Seurat Object
+### Apply Labels to Seurat Object
 
 ```r
 label_map <- setNames(
@@ -687,7 +687,7 @@ DimPlot(seurat_obj, group.by="cell_type_consensus",
 
 ---
 
-### Block 12 — Save Outputs
+### Save Outputs
 
 ```r
 write.csv(consensus_final,
@@ -785,4 +785,4 @@ cellmarker_list <- build_cellmarker_list(cellmarker_clean,
 
 ---
 
-*Part of a YouTube series on single-cell RNA-seq annotation. See the full series for reference-based annotation (SingleR, Azimuth, CellTypist) and AI-assisted annotation (CASSIA, GPTCelltype).*
+*Part of a YouTube series on single-cell RNA-seq annotation. See the full series for reference-based annotation (SingleR, Azimuth, CellTypist) and AI-assisted annotation (CASSIA, GPTCelltype).  https://www.youtube.com/playlist?list=PLAbpA2ThJEBSG-E1L0K9zwvlJB1vg4gbL*
